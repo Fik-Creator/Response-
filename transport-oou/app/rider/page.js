@@ -1,16 +1,13 @@
 'use client';
 import {useEffect,useMemo,useState} from 'react';
 import {trackEvent} from '../lib/analytics';
+import {OWNER_EMAIL,persistOwnerTrustedSession,restoreOwnerTrustedSession} from '../lib/owner-session';
 
 const U=process.env.NEXT_PUBLIC_SUPABASE_URL||'https://buqtngevtujsylfqbjem.supabase.co';
 const K=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'';
 const H=(t)=>({'apikey':K,'Authorization':'Bearer '+(t||K),'Content-Type':'application/json','Prefer':'return=representation'});
 async function api(path,opts={}){const r=await fetch(U+path,{...opts});const j=await r.json().catch(()=>null);if(!r.ok){const m=j?.msg||j?.message||j?.error_description||j?.error||j?.hint||j?.details||`Request failed (${r.status})`;throw Error(m)};return j}
 const logo='/transport-oou-logo.svg';
-const OWNER_EMAIL='fikayo009@gmail.com'
-const isOwnerEmail=(e)=>String(e||'').trim().toLowerCase()===OWNER_EMAIL
-const readStoredSession=(key)=>{try{const x=JSON.parse(localStorage.getItem(key)||'null');return x?.access_token&&x?.user?.email?.toLowerCase()===OWNER_EMAIL?x:null}catch{return null}}
-
 
 export default function RiderApp(){
  const [session,setSession]=useState(null),[access,setAccess]=useState(null),[operator,setOperator]=useState(null),[vehicle,setVehicle]=useState(null),[trips,setTrips]=useState([]),[bookings,setBookings]=useState([]),[loading,setLoading]=useState(true),[auth,setAuth]=useState(false),[mode,setMode]=useState('signin'),[email,setEmail]=useState(''),[code,setCode]=useState(''),[sent,setSent]=useState(false),[form,setForm]=useState({name:'',phone:'',plate:'',type:'Bus',model:'',color:'',license:''}),[toast,setToast]=useState(''),[scan,setScan]=useState(''),[locationOn,setLocationOn]=useState(false),[busy,setBusy]=useState(false);
@@ -31,14 +28,14 @@ export default function RiderApp(){
      if(p) setForm(f=>({...f,name:p.full_name||f.name,phone:p.phone||f.phone}));
    }catch(e){say(e.message.includes('rate limit')?'Please wait about 60 seconds before requesting another code.':e.message)}finally{setLoading(false)}
  };
- useEffect(()=>{const raw=localStorage.getItem('toou_rider_session');if(raw){try{setSession(JSON.parse(raw))}catch{}}},[]);
+ useEffect(()=>{const boot=async()=>{try{let current=JSON.parse(localStorage.getItem('toou_rider_session')||'null');if(current?.user?.email?.toLowerCase()===OWNER_EMAIL){current=await restoreOwnerTrustedSession(api,K);if(current)localStorage.setItem('toou_rider_session',JSON.stringify(current));else localStorage.removeItem('toou_rider_session')}else if(!current?.access_token){current=await restoreOwnerTrustedSession(api,K);if(current)localStorage.setItem('toou_rider_session',JSON.stringify(current))}if(current?.access_token)setSession(current)}catch(e){say(e.message)}};boot()},[]);
  useEffect(()=>{if(tok)refresh();else setLoading(false)},[tok]);
  async function send(){setBusy(true);try{if(!email.trim())throw Error('Enter your email');if(mode==='signup'&&!form.name.trim())throw Error('Enter your full name');await api('/auth/v1/otp',{method:'POST',headers:H(),body:JSON.stringify({email:email.trim().toLowerCase(),create_user:mode==='signup',data:mode==='signup'?{full_name:form.name.trim(),first_name:form.name.trim().split(/\s+/)[0]}:undefined})});setSent(true);say('Verification code sent')}catch(e){say(e.message)}finally{setBusy(false)}}
- async function verify(){setBusy(true);try{const x=await api('/auth/v1/verify',{method:'POST',headers:H(),body:JSON.stringify({email:email.trim().toLowerCase(),token:code,type:'email'})});localStorage.setItem('toou_rider_session',JSON.stringify(x));setSession(x);setAuth(false);setSent(false);say('Welcome to Transport OOU Rider');await onboard(x.access_token,x.user.id,true)}catch(e){say(e.message)}finally{setBusy(false)}}
+ async function verify(){setBusy(true);try{const x=await api('/auth/v1/verify',{method:'POST',headers:H(),body:JSON.stringify({email:email.trim().toLowerCase(),token:code,type:'email'})});localStorage.setItem('toou_rider_session',JSON.stringify(x));persistOwnerTrustedSession(x);setSession(x);setAuth(false);setSent(false);say('Welcome to Transport OOU Rider');await onboard(x.access_token,x.user.id,true)}catch(e){say(e.message)}finally{setBusy(false)}}
  async function onboard(t,userId,afterLogin=false){
    if(mode!=='signup'&&!afterLogin)return;
    try{
-    await api('/rest/v1/profiles?on_conflict=id',{method:'POST',headers:{...H(t),'Prefer':'resolution=merge-duplicates,return=representation'},body:JSON.stringify({id:userId,full_name:form.name||email.split('@')[0],email,phone:form.phone,user_type:'rider',role:'operator',verification_status:'pending'})});
+    await api('/rest/v1/profiles?on_conflict=id',{method:'POST',headers:{...H(t),'Prefer':'resolution=merge-duplicates,return=representation'},body:JSON.stringify({id:userId,full_name:form.name||email.split('@')[0],email,phone:form.phone,user_type:'student',role:'operator',verification_status:'pending'})});
     const exists=await api('/rest/v1/operators?user_id=eq.'+userId+'&select=id',{headers:H(t)});
     if(!exists?.length)await api('/rest/v1/operators',{method:'POST',headers:H(t),body:JSON.stringify({user_id:userId,operator_name:form.name||email.split('@')[0],phone:form.phone,status:'pending',requested_plate_number:form.plate.toUpperCase(),requested_vehicle_type:form.type,requested_make_model:form.model,requested_vehicle_color:form.color,driver_license_no:form.license})});
     await refresh();
@@ -56,6 +53,7 @@ export default function RiderApp(){
  const upcoming=useMemo(()=>trips.filter(t=>t.status!=='completed'&&t.status!=='cancelled').slice(0,5),[trips]);
  if(!session)return <AuthPage auth={auth} setAuth={setAuth} mode={mode} setMode={setMode} sent={sent} email={email} setEmail={setEmail} code={code} setCode={setCode} form={form} setForm={setForm} send={send} verify={verify} busy={busy} toast={toast}/>;
  if(loading)return <div className="rider-loading"><img src={logo}/><b>Loading Rider Centre…</b></div>;
+ if(!operator&&String(session.user?.email||'').toLowerCase()===OWNER_EMAIL)return <OwnerRiderPreview logout={logout} toast={toast}/>;
  if(!operator)return <Onboarding form={form} setForm={setForm} onSubmit={()=>onboard(tok,id)} logout={logout} toast={toast}/>;
  if(!access)return <Pending operator={operator} vehicle={vehicle} logout={logout} refresh={refresh} toast={toast}/>;
  return <main className="rider-app"><header className="rider-header"><div className="rider-brand"><img src={logo}/><span>RIDER</span></div><div className="rider-head-actions"><span className="rider-online-dot"></span><small>{vehicle?.plate_number||'No vehicle linked'}</small><button onClick={logout}>Sign out</button></div></header>
@@ -73,3 +71,15 @@ function AuthPage(p){return <div className="rider-auth"><div className="rider-au
 
 function Onboarding({form,setForm,onSubmit,logout,toast}){return <div className="rider-auth"><div className="rider-auth-card"><img src={logo} className="rider-auth-logo"/><small>APPLICATION RECEIVED</small><h1>Complete your rider profile</h1><p>Your email is verified. Submit the vehicle details so SUG/OOUSUTC can review the application.</p>{[['name','Full name'],['phone','Phone number'],['plate','Vehicle plate number'],['model','Vehicle make / model'],['color','Vehicle colour'],['license','Driver licence number']].map(([k,ph])=><input key={k} value={form[k]} placeholder={ph} onChange={e=>setForm({...form,[k]:e.target.value})}/>)}<select value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>{['Bus','Keke','Car / Sedan','SUV','Minibus','Van'].map(x=><option key={x}>{x}</option>)}</select><button className="rider-primary" onClick={onSubmit}>SUBMIT FOR APPROVAL</button><button className="rider-link" onClick={logout}>Sign out</button></div>{toast&&<div className="rider-toast">{toast}</div>}</div>}
 function Pending({operator,vehicle,logout,refresh,toast}){return <div className="rider-auth"><div className="rider-auth-card"><img src={logo} className="rider-auth-logo"/><small>APPLICATION STATUS</small><h1>Under review.</h1><p>Thanks, {operator.operator_name}. Your rider account is awaiting SUG/OOUSUTC approval. You cannot accept or board passengers until the operator and vehicle are approved.</p><div className="pending-box"><b>{operator.requested_plate_number||'Vehicle plate pending'}</b><span>{operator.requested_vehicle_type||'Vehicle type'} · {operator.requested_make_model||'Model not supplied'}</span><em>STATUS: {operator.status}</em></div><button className="rider-primary" onClick={refresh}>CHECK STATUS</button><button className="rider-link" onClick={logout}>Sign out</button></div>{toast&&<div className="rider-toast">{toast}</div>}</div>}
+
+function OwnerRiderPreview({logout,toast}) {
+  return <div className="rider-auth"><div className="rider-auth-card">
+    <img src={logo} className="rider-auth-logo" alt="Transport OOU"/>
+    <small>OWNER ACCESS · RIDER APP</small>
+    <h1>Rider centre connected.</h1>
+    <p>Your verified owner session is active across the Transport OOU apps for 24 hours. Rider operations remain restricted until a driver/operator application and vehicle are approved by SUG/OOUSUTC.</p>
+    <a className="rider-link" href="/admin">Open the SUG / Admin Control Centre →</a>
+    <button className="rider-primary" onClick={logout}>SIGN OUT</button>
+    {toast&&<div className="rider-toast">{toast}</div>}
+  </div></div>;
+}
