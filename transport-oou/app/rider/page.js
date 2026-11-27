@@ -1,5 +1,6 @@
 'use client';
 import {useEffect,useMemo,useState} from 'react';
+import {trackEvent} from '../lib/analytics';
 
 const U=process.env.NEXT_PUBLIC_SUPABASE_URL||'https://buqtngevtujsylfqbjem.supabase.co';
 const K=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'';
@@ -42,11 +43,11 @@ export default function RiderApp(){
  async function presence(on){
    if(!vehicle||!tok)return;
    setBusy(true);try{let lat=null,lng=null;if(on&&navigator.geolocation){try{const p=await new Promise((res,rej)=>navigator.geolocation.getCurrentPosition(res,rej,{enableHighAccuracy:true,timeout:7000}));lat=p.coords.latitude;lng=p.coords.longitude}catch{}}
-    await api('/rest/v1/rpc/rider_set_presence',{method:'POST',headers:H(tok),body:JSON.stringify({p_vehicle_id:vehicle.id,p_available:on,p_park:vehicle.current_park||'School Park',p_lat:lat,p_lng:lng})});setLocationOn(on);say(on?'You are now available at the park':'You are offline');refresh();
+    await api('/rest/v1/rpc/rider_set_presence',{method:'POST',headers:H(tok),body:JSON.stringify({p_vehicle_id:vehicle.id,p_available:on,p_park:vehicle.current_park||'School Park',p_lat:lat,p_lng:lng})});trackEvent(on?'rider_online':'rider_offline',{metadata:{vehicle_id:vehicle.id}});setLocationOn(on);say(on?'You are now available at the park':'You are offline');refresh();
    }catch(e){say(e.message)}finally{setBusy(false)}
  }
- async function tripStatus(trip,status){setBusy(true);try{await api('/rest/v1/rpc/rider_set_trip_status',{method:'POST',headers:H(tok),body:JSON.stringify({p_trip_id:trip.id,p_status:status})});say('Trip updated');refresh()}catch(e){say(e.message)}finally{setBusy(false)}}
- async function verifyBoarding(){if(!scan.trim())return;setBusy(true);try{const x=await api('/rest/v1/rpc/verify_boarding',{method:'POST',headers:H(tok),body:JSON.stringify({p_booking_code:scan.trim()})});say(x?.student_name+' • Seat '+x?.seat_number+' verified');setScan('');refresh()}catch(e){say(e.message)}finally{setBusy(false)}}
+ async function tripStatus(trip,status){setBusy(true);try{await api('/rest/v1/rpc/rider_set_trip_status',{method:'POST',headers:H(tok),body:JSON.stringify({p_trip_id:trip.id,p_status:status})});trackEvent('rider_trip_action',{tripId:trip.id,metadata:{status}});say('Trip updated');refresh()}catch(e){say(e.message)}finally{setBusy(false)}}
+ async function verifyBoarding(){if(!scan.trim())return;setBusy(true);try{const x=await api('/rest/v1/rpc/verify_boarding',{method:'POST',headers:H(tok),body:JSON.stringify({p_booking_code:scan.trim()})});trackEvent('boarding_verified',{tripId:x?.trip_id,metadata:{seat:x?.seat_number}});say(x?.student_name+' • Seat '+x?.seat_number+' verified');setScan('');refresh()}catch(e){say(e.message)}finally{setBusy(false)}}
  async function logout(){localStorage.removeItem('toou_rider_session');setSession(null);setAccess(null);setOperator(null);setVehicle(null)}
  const upcoming=useMemo(()=>trips.filter(t=>t.status!=='completed'&&t.status!=='cancelled').slice(0,5),[trips]);
  if(!session)return <AuthPage auth={auth} setAuth={setAuth} mode={mode} setMode={setMode} sent={sent} email={email} setEmail={setEmail} code={code} setCode={setCode} form={form} setForm={setForm} send={send} verify={verify} busy={busy} toast={toast}/>;
