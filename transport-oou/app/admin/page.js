@@ -8,6 +8,10 @@ const APP=typeof window==='undefined'?'https://transport-oou.vercel.app/admin':l
 const H=t=>({apikey:K,Authorization:'Bearer '+(t||K),'Content-Type':'application/json'})
 const api=async(p,o={})=>{const r=await fetch(U+p,o);let b=null;try{b=await r.json()}catch{}if(!r.ok)throw Error(b?.message||b?.error_description||b?.hint||'Request failed');return b}
 const fmt=t=>t?new Date(t).toLocaleString('en-NG',{dateStyle:'medium',timeStyle:'short'}):'—'
+const OWNER_EMAIL='fikayo009@gmail.com'
+const isOwnerEmail=(e)=>String(e||'').trim().toLowerCase()===OWNER_EMAIL
+const readStoredSession=(key)=>{try{const x=JSON.parse(localStorage.getItem(key)||'null');return x?.access_token&&x?.user?.email?.toLowerCase()===OWNER_EMAIL?x:null}catch{return null}}
+
 const tabs=['overview','analytics','operations','verification','operators','fleet','routes','trips','bookings','complaints','audit','admins']
 
 export default function Admin(){
