@@ -9,6 +9,7 @@ const APP=typeof window==='undefined'?'https://transport-oou.vercel.app/admin':l
 const H=t=>({apikey:K,Authorization:'Bearer '+(t||K),'Content-Type':'application/json'})
 const api=async(p,o={})=>{const r=await fetch(U+p,o);let b=null;try{b=await r.json()}catch{}if(!r.ok)throw Error(b?.message||b?.error_description||b?.hint||'Request failed');return b}
 const fmt=t=>t?new Date(t).toLocaleString('en-NG',{dateStyle:'medium',timeStyle:'short'}):'—'
+const authFeedback=(e)=>{const m=String(e?.message||'Authentication request failed');if(/signups not allowed for otp|otp_disabled/i.test(m))return 'Supabase is blocking new registrations. Enable “Allow new users to sign up” in Authentication → Sign In / Providers. Your 24-hour owner session begins after the first successful email verification.';if(/email address not authorized/i.test(m))return 'Supabase’s built-in mailer only delivers to authorized project-team addresses. Custom SMTP is required for OTP delivery to all users.';if(/rate limit|over_email_send_rate_limit/i.test(m))return 'OTP sending is rate-limited. Wait 60 seconds before retrying; the built-in Supabase mailer also has a low project-wide limit.';return m};
 const tabs=['overview','analytics','operations','verification','operators','fleet','routes','trips','bookings','complaints','audit','admins']
 
 export default function Admin(){
@@ -67,9 +68,9 @@ export default function Admin(){
  const liveFleet=data.vehicles.filter(x=>x.gps_lat&&x.gps_lng&&x.status==='approved')
  if(!session)return <Login email={email} setEmail={setEmail} otp={otp} setOtp={setOtp} sent={sent} send={send} verify={verify} busy={busy} message={msg}/>
  if(access===null)return <div className="admin-login"><div className="admin-login-card"><img src="/transport-oou-logo.svg" alt="Transport OOU"/><h1>Checking access…</h1><p>Securely checking your control-centre role.</p></div></div>
- if(access?.denied)return <div className="admin-denied"><img src="/transport-oou-logo.svg" alt="Transport OOU"/><h1>Admin access is not assigned.</h1><p>This account is authenticated, but it is not on the Transport OOU owner/SUG administrator list.</p><button className="secondary" onClick={()=>{localStorage.removeItem('toou_session');location.reload()}}>Sign out</button></div>
+ if(access?.denied)return <div className="admin-denied"><img src="/transport-oou-logo.svg" alt="Transport OOU"/><h1>Admin access is not assigned.</h1><p>This account is authenticated, but it is not on the Transport OOU owner/SUG administrator list.</p><button className="secondary" onClick={()=>{localStorage.removeItem('toou_session');localStorage.removeItem('toou_owner_trusted_session');location.reload()}}>Sign out</button></div>
  return <div className="admin-app">
-  <header className="admin-header"><div className="admin-brand"><img src="/transport-oou-logo.svg" alt="Transport OOU"/><span><b>CONTROL CENTRE</b><strong>{access.admin_role==='owner'?'OWNER':'SUG ADMIN'}</strong></span></div><div className="admin-user"><span>{access.title||'Administrator'}</span><button onClick={()=>{localStorage.removeItem('toou_session');location.href='/admin'}}>Sign out</button></div></header>
+  <header className="admin-header"><div className="admin-brand"><img src="/transport-oou-logo.svg" alt="Transport OOU"/><span><b>CONTROL CENTRE</b><strong>{access.admin_role==='owner'?'OWNER':'SUG ADMIN'}</strong></span></div><div className="admin-user"><span>{access.title||'Administrator'}</span><button onClick={()=>{localStorage.removeItem('toou_session');localStorage.removeItem('toou_owner_trusted_session');location.href='/admin'}}>Sign out</button></div></header>
   <div className="admin-shell">
    <aside>{tabs.map(x=><button key={x} className={tab===x?'on':''} onClick={()=>setTab(x)}>{x}</button>)}<a href="/rider" title="Rider app" target="_blank">Passenger app ↗</a></aside>
    <main className="admin-main">
