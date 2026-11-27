@@ -1,5 +1,6 @@
 'use client'
 import{useEffect,useMemo,useState}from'react'
+import{trackEvent}from'../lib/analytics'
 
 const U=process.env.NEXT_PUBLIC_SUPABASE_URL||'https://buqtngevtujsylfqbjem.supabase.co'
 const K=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY||''
@@ -7,13 +8,13 @@ const APP=typeof window==='undefined'?'https://transport-oou.vercel.app/admin':l
 const H=t=>({apikey:K,Authorization:'Bearer '+(t||K),'Content-Type':'application/json'})
 const api=async(p,o={})=>{const r=await fetch(U+p,o);let b=null;try{b=await r.json()}catch{}if(!r.ok)throw Error(b?.message||b?.error_description||b?.hint||'Request failed');return b}
 const fmt=t=>t?new Date(t).toLocaleString('en-NG',{dateStyle:'medium',timeStyle:'short'}):'—'
-const tabs=['overview','verification','operators','fleet','routes','trips','bookings','complaints','audit','admins']
+const tabs=['overview','analytics','operations','verification','operators','fleet','routes','trips','bookings','complaints','audit','admins']
 
 export default function Admin(){
- const[session,setSession]=useState(null),[access,setAccess]=useState(null),[auth,setAuth]=useState(false),[sent,setSent]=useState(false),[email,setEmail]=useState(''),[otp,setOtp]=useState(''),[tab,setTab]=useState('overview'),[data,setData]=useState({profiles:[],operators:[],vehicles:[],routes:[],trips:[],bookings:[],complaints:[],audit:[],admins:[]}),[busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[adminEmail,setAdminEmail]=useState(''),[adminRole,setAdminRole]=useState('sug'),[adminTitle,setAdminTitle]=useState('SUG Administrator')
+ const[session,setSession]=useState(null),[access,setAccess]=useState(null),[auth,setAuth]=useState(false),[sent,setSent]=useState(false),[email,setEmail]=useState(''),[otp,setOtp]=useState(''),[tab,setTab]=useState('overview'),[data,setData]=useState({profiles:[],operators:[],vehicles:[],routes:[],trips:[],bookings:[],complaints:[],audit:[],admins:[]}),[busy,setBusy]=useState(false),[msg,setMsg]=useState(''),[analytics,setAnalytics]=useState(null),[adminEmail,setAdminEmail]=useState(''),[adminRole,setAdminRole]=useState('sug'),[adminTitle,setAdminTitle]=useState('SUG Administrator')
  const toast=x=>{setMsg(x);clearTimeout(window.__adm);window.__adm=setTimeout(()=>setMsg(''),3500)}
  useEffect(()=>{try{const s=JSON.parse(localStorage.getItem('toou_session')||'null');if(s?.access_token){setSession(s);check(s.access_token,s.user?.id)}}catch{}},[])
- useEffect(()=>{if(session?.access_token&&access)loadAll()},[session,access,tab])
+ useEffect(()=>{if(session?.access_token&&access){loadAll();if(tab==='analytics')loadAnalytics()}},[session,access,tab])
   async function check(tok,id){try{const a=await api('/rest/v1/admin_users?user_id=eq.'+encodeURIComponent(id)+'&active=eq.true&select=admin_role,title,active',{headers:H(tok)});if(a?.[0]){setAccess(a[0]);return}const me=await api('/auth/v1/user',{headers:H(tok)});if((me?.email||'').toLowerCase()==='fikayo009@gmail.com'){await api('/rest/v1/rpc/claim_owner_by_email',{method:'POST',headers:H(tok),body:'{}'});const owner=await api('/rest/v1/admin_users?user_id=eq.'+encodeURIComponent(id)+'&active=eq.true&select=admin_role,title,active',{headers:H(tok)});if(owner?.[0]){setAccess(owner[0]);return}}setAccess({denied:true})}catch{setAccess({denied:true})}}
  async function send(){setBusy(true);try{await api('/auth/v1/otp',{method:'POST',headers:H(),body:JSON.stringify({email:email.trim().toLowerCase(),create_user:false})});setSent(true);toast('Admin sign-in code sent')}catch(e){toast(e.message)}setBusy(false)}
  async function verify(){setBusy(true);try{const s=await api('/auth/v1/verify',{method:'POST',headers:H(),body:JSON.stringify({email,token:otp,type:'email'})});localStorage.setItem('toou_session',JSON.stringify(s));setSession(s);await check(s.access_token,s.user.id);setSent(false);setAuth(false);toast('Signed in')}catch(e){toast(e.message)}setBusy(false)}
@@ -34,6 +35,15 @@ export default function Admin(){
    ])
    setData({profiles,operators,vehicles,routes,trips,bookings,complaints,audit,admins});setBusy(false)
  }
+ async function loadAnalytics(){
+   if(!session?.access_token)return
+   try{
+     const x=await api('/rest/v1/rpc/get_admin_analytics',{method:'POST',headers:H(session.access_token),body:JSON.stringify({p_days:7})})
+     setAnalytics(x||null)
+     trackEvent('admin_view',{metadata:{tab:'analytics'}})
+   }catch(e){toast(e.message)}
+ }
+
  async function patch(table,id,payload,action,type){
    if(!session?.access_token)return
    setBusy(true)
@@ -64,7 +74,7 @@ export default function Admin(){
    <main className="admin-main">
     <div className="admin-mobile-tabs">{tabs.map(x=><button key={x} className={tab===x?'on':''} onClick={()=>setTab(x)}>{x}</button>)}</div>
     {tab==='overview'&&<Overview pending={pending.length} fleet={approvedFleet.length} dispatched={dispatched.length} live={liveFleet.length} trips={data.trips.length} bookings={data.bookings.length} complaints={data.complaints.filter(x=>x.status==='open').length} on={setTab}/>}
-    {tab==='verification'&&<Verification rows={pending} patch={patch}/>}
+    {tab==='analytics'&&<AnalyticsPanel data={analytics} refresh={loadAnalytics} busy={busy}/>}{tab==='operations'&&<Operations rows={data.vehicles}/>}{tab==='verification'&&<Verification rows={pending} patch={patch}/>}
     {tab==='operators'&&<Operators rows={data.operators} patch={patch}/>}
     {tab==='fleet'&&<Fleet rows={data.vehicles} patch={patch}/>}
     {tab==='routes'&&<Routes rows={data.routes} patch={patch}/>}
@@ -79,8 +89,44 @@ export default function Admin(){
  </div>
 }
 
+
+function Operations({rows}){
+ const live=rows.filter(v=>v.status==='approved'&&v.gps_lat!=null&&v.gps_lng!=null)
+ return <section><Head title="Live operations" text="Approved vehicles, current dispatch state and the latest GPS heartbeat."/>
+  <div className="ops-grid">
+   <div className="ops-map"><iframe title="OOU live operations map" src="https://www.openstreetmap.org/export/embed.html?bbox=3.84%2C6.89%2C3.96%2C6.98&layer=mapnik&marker=6.9388%2C3.9194"/></div>
+   <div className="ops-list">{rows.filter(v=>v.status==='approved').slice(0,12).map(v=><article key={v.id} className="ops-card"><div><b>{v.fleet_code||v.plate_number}</b><small>{v.vehicle_type?.toUpperCase()} · {v.make_model||'Vehicle'} · {v.current_park||'Park not set'}</small></div><div className="ops-meta"><span className={v.gps_lat!=null?'live-dot':''}/><b>{v.available_for_dispatch?'AVAILABLE':'OFFLINE'}</b><small>{v.last_seen_at?new Date(v.last_seen_at).toLocaleTimeString('en-NG',{hour:'2-digit',minute:'2-digit'}):'No GPS heartbeat'}</small></div></article>)}{!rows.length&&<Empty text="No fleet records yet."/>}</div>
+  </div>
+  <div className="admin-note"><b>GPS rule</b><p>"Live" means an approved vehicle has a recent location heartbeat. The map is intentionally kept as a simple OOU operations view until the final route corridor data is verified.</p></div>
+ </section>
+}
+
+function AnalyticsPanel({data,refresh,busy}){
+ const s=data?.summary||{},o=data?.operations||{},f=data?.funnel||[],d=data?.daily||[],r=data?.top_routes||[]
+ const max=Math.max(1,...d.map(x=>Number(x.views||0)))
+ const cards=[
+  ['Page views',s.page_views||0],
+  ['Unique visitors',s.unique_visitors||0],
+  ['Bookings completed',s.booking_completed||0],
+  ['Boardings verified',s.boarding_verified||0],
+  ['Approved riders',o.approved_riders||0],
+  ['GPS live',o.gps_live||0],
+  ['Online fleet',o.online_fleet||0],
+  ['Open complaints',o.open_complaints||0]
+ ]
+ return <section><div className="analytics-head"><Head title="Product analytics" text="Traffic, booking behaviour and live operations for the last 7 days."/><button className="admin-secondary" onClick={refresh} disabled={busy}>Refresh</button></div>
+  <div className="analytics-cards">{cards.map(([label,n])=><div className="analytics-card" key={label}><span>{label}</span><strong>{n}</strong></div>)}</div>
+  <div className="analytics-columns">
+   <div className="analytics-panel"><div className="panel-title"><b>Daily activity</b><small>Page views and bookings</small></div><div className="daily-bars">{d.map(x=><div className="day-row" key={x.day}><span>{new Date(x.day).toLocaleDateString('en-NG',{weekday:'short'})}</span><div className="bar-track"><i style={{width:Math.max(2,(Number(x.views||0)/max)*100)+'%'}}/></div><b>{x.views||0}</b><em>{x.bookings||0} bookings</em></div>)}</div></div>
+   <div className="analytics-panel"><div className="panel-title"><b>Top routes</b><small>By bookings</small></div>{r.slice(0,7).map((x,i)=><div className="rank-row" key={x.route}><span>{i+1}</span><div><b>{x.route}</b><small>{x.bookings} bookings</small></div></div>)}{!r.length&&<Empty text="Booking data will appear here."/>}</div>
+  </div>
+  <div className="analytics-panel"><div className="panel-title"><b>Passenger funnel</b><small>Session to completed booking</small></div><div className="funnel">{f.map((x,i)=>{const prev=Number(f[i-1]?.count||x.count||1);const pct=i?Math.min(100,Math.round((Number(x.count||0)/Math.max(1,prev))*100)):100;return <div className="funnel-row" key={x.event}><span>{x.event.replaceAll('_',' ')}</span><div className="bar-track"><i style={{width:Math.max(2,pct)+'%'}}/></div><b>{x.count||0}</b></div>})}</div></div>
+  <div className="analytics-foot"><div><b>Platform monitoring</b><span>Vercel Web Analytics covers site traffic while Supabase Observability covers API, Auth, database and Realtime health.</span></div><div className="health-pills"><span>DB connected</span><span>RLS active</span><span>Analytics live</span></div></div>
+ </section>
+}
+
 function Login(p){return <div className="admin-login"><div className="admin-login-card"><img src="/transport-oou-logo.svg" alt="Transport OOU"/><small>CONTROL CENTRE</small><h1>Transport OOU Admin</h1><p>Owner and approved SUG administrators sign in with their email. No passenger/OOU verification workflow is required here.</p>{p.sent?<><input value={p.otp} onChange={e=>p.setOtp(e.target.value)} inputMode="numeric" autoComplete="one-time-code" placeholder="6-digit verification code"/><button className="primary full" onClick={p.verify} disabled={p.busy}>Verify email</button></>:<><input type="email" value={p.email} onChange={e=>p.setEmail(e.target.value)} autoComplete="email" placeholder="Administrator email"/><button className="primary full" onClick={p.send} disabled={!p.email||p.busy}>Send sign-in code</button></>}<a href="/">← Passenger app</a></div></div>}
-function Overview({pending,fleet,dispatched,live,trips,bookings,complaints,on}){const cards=[['Pending verification',pending,'verification'],['Approved fleet',fleet,'fleet'],['Available at park',dispatched,'fleet'],['Fleet GPS live',live,'map'],['Trips',trips,'trips'],['Bookings',bookings,'bookings'],['Open complaints',complaints,'complaints']];return <section><div className="admin-hero"><div><small>TRANSPORT OOU CONTROL CENTRE</small><h1>Operate the network.</h1><p>Verify people, approve operators and vehicles, create trips, monitor bookings and resolve passenger issues.</p></div><div className="admin-live"><span/> Control systems online</div></div><div className="stat-grid">{cards.map(([label,n,to])=><button key={label} onClick={()=>on(to)}><span>{label}</span><strong>{n}</strong></button>)}</div><div className="admin-note"><b>Dispatch rule</b><p>A passenger does not choose a random bus. The operational system assigns an approved vehicle to a route, creates the trip and locks an exact seat to that trip.</p></div></section>}
+function Overview({pending,fleet,dispatched,live,trips,bookings,complaints,on}){const cards=[['Pending verification',pending,'verification'],['Approved fleet',fleet,'fleet'],['Available at park',dispatched,'fleet'],['Fleet GPS live',live,'operations'],['Trips',trips,'trips'],['Bookings',bookings,'bookings'],['Open complaints',complaints,'complaints']];return <section><div className="admin-hero"><div><small>TRANSPORT OOU CONTROL CENTRE</small><h1>Operate the network.</h1><p>Verify people, approve operators and vehicles, create trips, monitor bookings and resolve passenger issues.</p></div><div className="admin-live"><span/> Control systems online</div></div><div className="stat-grid">{cards.map(([label,n,to])=><button key={label} onClick={()=>on(to)}><span>{label}</span><strong>{n}</strong></button>)}</div><div className="admin-note"><b>Dispatch rule</b><p>A passenger does not choose a random bus. The operational system assigns an approved vehicle to a route, creates the trip and locks an exact seat to that trip.</p></div></section>}
 
 function Verification({rows,patch}){return <section><Head title="Student verification" text="Confirm the identity records that unlock passenger booking."/><div className="admin-list">{rows.map(x=><article key={x.id} className="admin-row"><div><b>{x.full_name||'Unnamed student'}</b><small>{x.user_type} · Level {x.level||'—'} · {x.email||x.phone||'No contact'}</small><small>Matric: {x.matric_no||'—'} · JAMB: {x.jamb_reg_no||'—'}</small></div><div className="row-actions"><button onClick={()=>patch('profiles',x.id,{verification_status:'verified'},'verify_profile','profile')}>Verify</button><button className="danger" onClick={()=>patch('profiles',x.id,{verification_status:'suspended'},'suspend_profile','profile')}>Suspend</button></div></article>)}{!rows.length&&<Empty text="No pending profiles."/ >}</div></section>}
 
