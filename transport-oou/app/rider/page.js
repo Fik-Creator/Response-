@@ -5,8 +5,12 @@ import {trackEvent} from '../lib/analytics';
 const U=process.env.NEXT_PUBLIC_SUPABASE_URL||'https://buqtngevtujsylfqbjem.supabase.co';
 const K=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||'';
 const H=(t)=>({'apikey':K,'Authorization':'Bearer '+(t||K),'Content-Type':'application/json','Prefer':'return=representation'});
-async function api(path,opts={}){const r=await fetch(U+path,{...opts});const j=await r.json().catch(()=>null);if(!r.ok)throw Error(j?.message||j?.error_description||'Request failed');return j}
+async function api(path,opts={}){const r=await fetch(U+path,{...opts});const j=await r.json().catch(()=>null);if(!r.ok){const m=j?.msg||j?.message||j?.error_description||j?.error||j?.hint||j?.details||`Request failed (${r.status})`;throw Error(m)};return j}
 const logo='/transport-oou-logo.svg';
+const OWNER_EMAIL='fikayo009@gmail.com'
+const isOwnerEmail=(e)=>String(e||'').trim().toLowerCase()===OWNER_EMAIL
+const readStoredSession=(key)=>{try{const x=JSON.parse(localStorage.getItem(key)||'null');return x?.access_token&&x?.user?.email?.toLowerCase()===OWNER_EMAIL?x:null}catch{return null}}
+
 
 export default function RiderApp(){
  const [session,setSession]=useState(null),[access,setAccess]=useState(null),[operator,setOperator]=useState(null),[vehicle,setVehicle]=useState(null),[trips,setTrips]=useState([]),[bookings,setBookings]=useState([]),[loading,setLoading]=useState(true),[auth,setAuth]=useState(false),[mode,setMode]=useState('signin'),[email,setEmail]=useState(''),[code,setCode]=useState(''),[sent,setSent]=useState(false),[form,setForm]=useState({name:'',phone:'',plate:'',type:'Bus',model:'',color:'',license:''}),[toast,setToast]=useState(''),[scan,setScan]=useState(''),[locationOn,setLocationOn]=useState(false),[busy,setBusy]=useState(false);
@@ -25,7 +29,7 @@ export default function RiderApp(){
        }
      } else setVehicle(null);
      if(p) setForm(f=>({...f,name:p.full_name||f.name,phone:p.phone||f.phone}));
-   }catch(e){say(e.message)}finally{setLoading(false)}
+   }catch(e){say(e.message.includes('rate limit')?'Please wait about 60 seconds before requesting another code.':e.message)}finally{setLoading(false)}
  };
  useEffect(()=>{const raw=localStorage.getItem('toou_rider_session');if(raw){try{setSession(JSON.parse(raw))}catch{}}},[]);
  useEffect(()=>{if(tok)refresh();else setLoading(false)},[tok]);
